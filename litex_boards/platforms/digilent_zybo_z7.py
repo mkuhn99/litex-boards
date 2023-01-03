@@ -102,7 +102,12 @@ ps7_config = {
         "PCW_USB0_USB0_IO"              : "MIO 28 .. 39",
         "PCW_USB0_RESET_ENABLE"         : "1",
         "PCW_USB0_RESET_IO"             : "MIO 46",
-        "PCW_EN_USB0"                   : "1"
+        "PCW_EN_USB0"                   : "1",
+        "PCW_EN_ENET0"                  : "1",
+        "PCW_ENET0_PERIPHERAL_ENABLE"   : "1",
+        "PCW_ENET0_ENET0_IO"            : "MIO 16 .. 27",
+        "PCW_ENET0_GRP_MDIO_ENABLE"     : "1",
+        "PCW_ENET0_GRP_MDIO_IO"         : "MIO 52 .. 53",
     }
 }
 # Platform -----------------------------------------------------------------------------------------
