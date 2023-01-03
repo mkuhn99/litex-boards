@@ -109,27 +109,31 @@ class BaseSoC(SoCCore):
                 zynq.set_ps7(name="ps", config = platform.ps7_config)
                 axi_S_GP0   = zynq.add_axi_gp_slave(clock_domain = self.crg.cd_sys.name)
                 axi_S_GP1   = zynq.add_axi_gp_slave(clock_domain = self.crg.cd_sys.name)
+
+                ddr_addr = 0x4000_0000
                 axi_ddr = axi.AXIInterface(axi_S_GP0.data_width, axi_S_GP0.address_width, axi_S_GP0.id_width)
-                map_fct_ddr = lambda sig : sig - 0x4000_0000 + 0x0008_0000
+                map_fct_ddr = lambda sig : sig - ddr_addr + 0x0008_0000
                 self.comb += axi_ddr.connect_mapped(axi_S_GP0, map_fct_ddr)
                 self.bus.add_slave(
                     name="main_ram",slave=axi_ddr,
                     region=SoCRegion(
-                        origin=0x4000_0000,
+                        origin=ddr_addr,
                         size=0x2000_0000,
                         mode="rwx"
                     )
                 )
+
+                ps_io_addr = 0x8000_0000
                 axi_io = axi.AXIInterface(axi_S_GP1.data_width, axi_S_GP1.address_width, axi_S_GP1.id_width)
-                map_fct_io = lambda sig : sig - 0x6000_0000 + 0xE000_0000
+                map_fct_io = lambda sig : sig - ps_io_addr + 0xE000_0000
                 self.comb += axi_io.connect_mapped(axi_S_GP1, map_fct_io)
                 self.bus.add_slave(
                     name="ps_io",slave=axi_io,
                     region=SoCRegion(
-                        origin=0x6000_0000,
+                        origin=ps_io_addr,
                         size=0x0030_0000,
                         mode="rw",
-                        # cached=False
+                        cached=False
                     )
                 )
                 self.submodules += zynq
@@ -224,12 +228,10 @@ static inline uint8_t uart_rxtx_read(void) {
 }
 
 static inline uint8_t uart_txfull_read(void) {
-    flush_cpu_dcache();
     return XUartPs_IsTransmitFull(STDOUT_BASEADDRESS);
 }
 
 static inline uint8_t uart_rxempty_read(void) {
-    flush_cpu_dcache();
     return !XUartPs_IsReceiveData(STDOUT_BASEADDRESS);
 }
 
