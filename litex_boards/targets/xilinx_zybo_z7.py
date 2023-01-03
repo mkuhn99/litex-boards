@@ -109,27 +109,31 @@ class BaseSoC(SoCCore):
                 zynq.set_ps7(name="ps", config = platform.ps7_config)
                 axi_S_GP0   = zynq.add_axi_gp_slave(clock_domain = self.crg.cd_sys.name)
                 axi_S_GP1   = zynq.add_axi_gp_slave(clock_domain = self.crg.cd_sys.name)
+
+                ddr_addr = 0x4000_0000
                 axi_ddr = axi.AXIInterface(axi_S_GP0.data_width, axi_S_GP0.address_width, axi_S_GP0.id_width)
-                map_fct_ddr = lambda sig : sig - 0x4000_0000 + 0x0008_0000
+                map_fct_ddr = lambda sig : sig - ddr_addr + 0x0008_0000
                 self.comb += axi_ddr.connect_mapped(axi_S_GP0, map_fct_ddr)
                 self.bus.add_slave(
                     name="main_ram",slave=axi_ddr,
                     region=SoCRegion(
-                        origin=0x4000_0000,
+                        origin=ddr_addr,
                         size=0x2000_0000,
                         mode="rwx"
                     )
                 )
+
+                ps_io_addr = 0x8000_0000
                 axi_io = axi.AXIInterface(axi_S_GP1.data_width, axi_S_GP1.address_width, axi_S_GP1.id_width)
-                map_fct_io = lambda sig : sig - 0x6000_0000 + 0xE000_0000
+                map_fct_io = lambda sig : sig - ps_io_addr + 0xE000_0000
                 self.comb += axi_io.connect_mapped(axi_S_GP1, map_fct_io)
                 self.bus.add_slave(
                     name="ps_io",slave=axi_io,
                     region=SoCRegion(
-                        origin=0x6000_0000,
-                        size=0x0030_0000,
+                        origin=ps_io_addr,
+                        size=0x2000_0000,
                         mode="rw",
-                        # cached=False
+                        cached=False
                     )
                 )
                 self.submodules += zynq
@@ -195,13 +199,20 @@ class BaseSoC(SoCCore):
             for header in [
                 'XilinxProcessorIPLib/drivers/uartps/src/xuartps_hw.h',
                 'XilinxProcessorIPLib/drivers/uartps/src/xuartps.h',
+                'XilinxProcessorIPLib/drivers/emacps/src/xemacps_hw.h',
+                'XilinxProcessorIPLib/drivers/emacps/src/xemacps.h',
+                'XilinxProcessorIPLib/drivers/emacps/src/xemacps_bd.h',
+                'XilinxProcessorIPLib/drivers/emacps/src/xemacps_bdring.h',
+                'XilinxProcessorIPLib/drivers/intc/src/xintc.h',
+                'XilinxProcessorIPLib/drivers/intc/src/xintc_l.h',
+                'XilinxProcessorIPLib/drivers/intc/src/xintc_i.h',
                 'lib/bsp/standalone/src/common/xil_types.h',
                 'lib/bsp/standalone/src/common/xil_assert.h',
                 'lib/bsp/standalone/src/common/xil_io.h',
                 'lib/bsp/standalone/src/common/xil_printf.h',
                 'lib/bsp/standalone/src/common/xplatform_info.h',
                 'lib/bsp/standalone/src/common/xstatus.h',
-                'lib/bsp/standalone/src/common/xdebug.h'
+                'lib/bsp/standalone/src/common/xdebug.h',
             ]:
                 shutil.copy(os.path.join(lib, header), self.builder.include_dir)
             write_to_file(os.path.join(self.builder.include_dir, 'uart_ps.h'), '''
@@ -224,12 +235,10 @@ static inline uint8_t uart_rxtx_read(void) {
 }
 
 static inline uint8_t uart_txfull_read(void) {
-    flush_cpu_dcache();
     return XUartPs_IsTransmitFull(STDOUT_BASEADDRESS);
 }
 
 static inline uint8_t uart_rxempty_read(void) {
-    flush_cpu_dcache();
     return !XUartPs_IsReceiveData(STDOUT_BASEADDRESS);
 }
 
@@ -290,6 +299,27 @@ void Xil_L2CacheFlush(void) {
 #define STDIN_BASEADDRESS             PS_IO_BASE + 0x1000
 #define XPAR_PS7_DDR_0_S_AXI_BASEADDR MAIN_RAM_BASE
 #define XPAR_PS7_DDR_0_S_AXI_HIGHADDR MAIN_RAM_BASE + MAIN_RAM_SIZE
+#define XPAR_XEMACPS_NUM_INSTANCES    1
+#define XPAR_XINTC_NUM_INSTANCES      1
+#define XPAR_INTC_MAX_NUM_INTR_INPUTS 5
+#define XPAR_INTC_0_DEVICE_ID         0
+#define XPAR_INTC_0_BASEADDR          0xF8000000U - 0xE0000000 + PS_IO_BASE
+#define XPAR_INTC_0_ACK_BEFORE        1
+#define XPAR_INTC_1_DEVICE_ID         3
+#define XPAR_INTC_1_BASEADDR          0xF8000000U - 0xE0000000 + PS_IO_BASE
+#define XPAR_INTC_1_ACK_BEFORE        1
+#define XPAR_XEMACPS_0_DEVICE_ID      1
+#define XPAR_XEMACPS_0_BASEADDR       PS_IO_BASE + 0xb000
+
+//?????????????????
+#define XPAR_XEMACPS_0_IS_CACHE_COHERENT 1
+#define XPAR_XEMACPS_0_ENET_SLCR_1000Mbps_DIV0 8
+#define XPAR_XEMACPS_0_ENET_SLCR_1000Mbps_DIV1 1
+#define XPAR_XEMACPS_0_ENET_SLCR_100Mbps_DIV0 8
+#define XPAR_XEMACPS_0_ENET_SLCR_100Mbps_DIV1 5
+#define XPAR_XEMACPS_0_ENET_SLCR_10Mbps_DIV0 8
+#define XPAR_XEMACPS_0_ENET_SLCR_10Mbps_DIV1 50
+
 #endif
 ''')
             write_to_file(os.path.join(self.builder.include_dir, 'xpseudo_asm.h'), '''
@@ -304,6 +334,7 @@ void Xil_L2CacheFlush(void) {
 
 #endif
 ''')
+            write_to_file(os.path.join(self.builder.include_dir, 'xil_exception.h'), '''''')
 # Build --------------------------------------------------------------------------------------------
 
 def main():
