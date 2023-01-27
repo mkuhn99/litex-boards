@@ -14,6 +14,9 @@ from litex_boards.platforms import digilent_zybo_z7
 
 from litex.soc.interconnect import axi
 from litex.soc.interconnect import wishbone
+from litex.soc.interconnect import csr_eventmanager
+from litex.soc.interconnect.csr_eventmanager import EventManager, EventSourceLevel, EventSourcePulse
+from litex.soc.interconnect.csr import AutoCSR
 
 from litex.soc.cores.clock import *
 from litex.soc.integration.soc_core import *
@@ -22,6 +25,15 @@ from litex.soc.cores.led import LedChaser
 from litex.soc.integration.soc import SoCRegion
 
 from litex.soc.cores import cpu
+
+# PS Interrupts ------------------------------------------------------------------------------------
+class PsUart(Module, AutoCSR):
+    def __init__(self, uart1_irq):
+            self.submodules.ev = EventManager()
+            self.ev.my_int_uart = EventSourceLevel()
+            self.ev.finalize()
+            self.comb += self.ev.my_int_uart.trigger.eq(uart1_irq)
+
 # CRG ----------------------------------------------------------------------------------------------
 
 class _CRG(LiteXModule):
@@ -43,7 +55,10 @@ class _CRG(LiteXModule):
 # BaseSoC ------------------------------------------------------------------------------------------
 
 class BaseSoC(SoCCore):
-    def __init__(self, sys_clk_freq=100e6, variant="z7-10", with_ps7=False, with_led_chaser=True, **kwargs):
+    def __init__(self, sys_clk_freq=100e6, variant="z7-10", with_ps7=False, with_led_chaser=False, **kwargs):
+        self.interrupt_map = {
+            "ps_uart" : 2,
+        }
         platform = digilent_zybo_z7.Platform()
         self.builder    = None
         self.with_ps7   = with_ps7
@@ -109,6 +124,13 @@ class BaseSoC(SoCCore):
                 zynq.set_ps7(name="ps", config = platform.ps7_config)
                 axi_S_GP0   = zynq.add_axi_gp_slave(clock_domain = self.crg.cd_sys.name)
                 axi_S_GP1   = zynq.add_axi_gp_slave(clock_domain = self.crg.cd_sys.name)
+                axi_M_GP0   = zynq.add_axi_gp_master()
+                self.bus.add_master(master=axi_M_GP0)
+
+                self.add_ram("aligned_ram",
+                    origin = 0x6000_0000,
+                    size   = 0x1_0000
+                )
 
                 ddr_addr = 0x4000_0000
                 axi_ddr = axi.AXIInterface(axi_S_GP0.data_width, axi_S_GP0.address_width, axi_S_GP0.id_width)
@@ -136,6 +158,8 @@ class BaseSoC(SoCCore):
                         cached=False
                     )
                 )
+                # Interrupts -----------------------------------------------------------------------
+                self.submodules.ps_uart = ps_uart = PsUart(zynq.uart1_irq)
                 self.submodules += zynq
             else:
                 #TODO: make config for zybo-z7-10
@@ -221,11 +245,13 @@ extern "C" {
 #endif
 
 #include "xuartps_hw.h"
-#include "system.h"
+
+#include <generated/csr.h>
 
 #define CSR_UART_BASE
+/**
 #define UART_POLLING
-
+**/
 static inline void uart_rxtx_write(char c) {
     XUartPs_WriteReg(STDOUT_BASEADDRESS, XUARTPS_FIFO_OFFSET, (uint32_t) c);
 }
@@ -242,18 +268,23 @@ static inline uint8_t uart_rxempty_read(void) {
     return !XUartPs_IsReceiveData(STDOUT_BASEADDRESS);
 }
 
-static inline void uart_ev_pending_write(uint8_t x) { }
+static inline void uart_ev_pending_write(uint32_t x) {
+    ps_uart_ev_pending_write(x);
+ }
 
-static inline uint8_t uart_ev_pending_read(void) {
-    return 0;
+static inline uint32_t uart_ev_pending_read(void) {
+    return ps_uart_ev_pending_read();
 }
 
-static inline void uart_ev_enable_write(uint8_t x) { }
+static inline void uart_ev_enable_write(uint32_t x) {
+    ps_uart_ev_enable_write(x);
+}
 
 #ifdef __cplusplus
 }
 #endif
 ''')
+
             write_to_file(os.path.join(self.builder.include_dir, 'xil_cache.h'), '''
 #ifndef XIL_CACHE_H
 #define XIL_CACHE_H

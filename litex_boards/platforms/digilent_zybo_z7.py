@@ -108,6 +108,9 @@ ps7_config = {
         "PCW_ENET0_ENET0_IO"            : "MIO 16 .. 27",
         "PCW_ENET0_GRP_MDIO_ENABLE"     : "1",
         "PCW_ENET0_GRP_MDIO_IO"         : "MIO 52 .. 53",
+        "PCW_USE_FABRIC_INTERRUPT"      : "1",
+        "PCW_P2F_ENET0_INTR"            : "1",
+        "PCW_P2F_UART1_INTR"            : "1"
     }
 }
 # Platform -----------------------------------------------------------------------------------------
