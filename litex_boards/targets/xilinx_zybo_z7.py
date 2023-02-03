@@ -27,12 +27,12 @@ from litex.soc.integration.soc import SoCRegion
 from litex.soc.cores import cpu
 
 # PS Interrupts ------------------------------------------------------------------------------------
-class PsUart(Module, AutoCSR):
+class PsIRQ(Module, AutoCSR):
     def __init__(self, uart1_irq):
             self.submodules.ev = EventManager()
-            self.ev.my_int_uart = EventSourceLevel()
+            self.ev.uart = EventSourceLevel()
             self.ev.finalize()
-            self.comb += self.ev.my_int_uart.trigger.eq(uart1_irq)
+            self.comb += self.ev.uart.trigger.eq(uart1_irq)
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -57,7 +57,7 @@ class _CRG(LiteXModule):
 class BaseSoC(SoCCore):
     def __init__(self, sys_clk_freq=100e6, variant="z7-10", with_ps7=False, with_led_chaser=False, **kwargs):
         self.interrupt_map = {
-            "ps_uart" : 2,
+            "ps" : 2,
         }
         platform = digilent_zybo_z7.Platform()
         self.builder    = None
@@ -127,11 +127,6 @@ class BaseSoC(SoCCore):
                 axi_M_GP0   = zynq.add_axi_gp_master()
                 self.bus.add_master(master=axi_M_GP0)
 
-                self.add_ram("aligned_ram",
-                    origin = 0x6000_0000,
-                    size   = 0x1_0000
-                )
-
                 ddr_addr = 0x4000_0000
                 axi_ddr = axi.AXIInterface(axi_S_GP0.data_width, axi_S_GP0.address_width, axi_S_GP0.id_width)
                 map_fct_ddr = lambda sig : sig - ddr_addr + 0x0008_0000
@@ -159,7 +154,7 @@ class BaseSoC(SoCCore):
                     )
                 )
                 # Interrupts -----------------------------------------------------------------------
-                self.submodules.ps_uart = ps_uart = PsUart(zynq.uart1_irq)
+                self.submodules.ps = ps = PsIRQ(zynq.uart1_irq)
                 self.submodules += zynq
             else:
                 #TODO: make config for zybo-z7-10
@@ -223,20 +218,12 @@ class BaseSoC(SoCCore):
             for header in [
                 'XilinxProcessorIPLib/drivers/uartps/src/xuartps_hw.h',
                 'XilinxProcessorIPLib/drivers/uartps/src/xuartps.h',
-                'XilinxProcessorIPLib/drivers/emacps/src/xemacps_hw.h',
-                'XilinxProcessorIPLib/drivers/emacps/src/xemacps.h',
-                'XilinxProcessorIPLib/drivers/emacps/src/xemacps_bd.h',
-                'XilinxProcessorIPLib/drivers/emacps/src/xemacps_bdring.h',
-                'XilinxProcessorIPLib/drivers/intc/src/xintc.h',
-                'XilinxProcessorIPLib/drivers/intc/src/xintc_l.h',
-                'XilinxProcessorIPLib/drivers/intc/src/xintc_i.h',
                 'lib/bsp/standalone/src/common/xil_types.h',
                 'lib/bsp/standalone/src/common/xil_assert.h',
                 'lib/bsp/standalone/src/common/xil_io.h',
                 'lib/bsp/standalone/src/common/xil_printf.h',
                 'lib/bsp/standalone/src/common/xplatform_info.h',
                 'lib/bsp/standalone/src/common/xstatus.h',
-                'lib/bsp/standalone/src/common/xdebug.h',
             ]:
                 shutil.copy(os.path.join(lib, header), self.builder.include_dir)
             write_to_file(os.path.join(self.builder.include_dir, 'uart_ps.h'), '''
@@ -249,9 +236,7 @@ extern "C" {
 #include <generated/csr.h>
 
 #define CSR_UART_BASE
-/**
-#define UART_POLLING
-**/
+
 static inline void uart_rxtx_write(char c) {
     XUartPs_WriteReg(STDOUT_BASEADDRESS, XUARTPS_FIFO_OFFSET, (uint32_t) c);
 }
@@ -269,15 +254,15 @@ static inline uint8_t uart_rxempty_read(void) {
 }
 
 static inline void uart_ev_pending_write(uint32_t x) {
-    ps_uart_ev_pending_write(x);
+    ps_ev_pending_uart_write(x);
  }
 
 static inline uint32_t uart_ev_pending_read(void) {
-    return ps_uart_ev_pending_read();
+    return ps_ev_pending_uart_read();
 }
 
 static inline void uart_ev_enable_write(uint32_t x) {
-    ps_uart_ev_enable_write(x);
+    ps_ev_enable_uart_write(x);
 }
 
 #ifdef __cplusplus
@@ -330,27 +315,6 @@ void Xil_L2CacheFlush(void) {
 #define STDIN_BASEADDRESS             PS_IO_BASE + 0x1000
 #define XPAR_PS7_DDR_0_S_AXI_BASEADDR MAIN_RAM_BASE
 #define XPAR_PS7_DDR_0_S_AXI_HIGHADDR MAIN_RAM_BASE + MAIN_RAM_SIZE
-#define XPAR_XEMACPS_NUM_INSTANCES    1
-#define XPAR_XINTC_NUM_INSTANCES      1
-#define XPAR_INTC_MAX_NUM_INTR_INPUTS 5
-#define XPAR_INTC_0_DEVICE_ID         0
-#define XPAR_INTC_0_BASEADDR          0xF8000000U - 0xE0000000 + PS_IO_BASE
-#define XPAR_INTC_0_ACK_BEFORE        1
-#define XPAR_INTC_1_DEVICE_ID         3
-#define XPAR_INTC_1_BASEADDR          0xF8000000U - 0xE0000000 + PS_IO_BASE
-#define XPAR_INTC_1_ACK_BEFORE        1
-#define XPAR_XEMACPS_0_DEVICE_ID      1
-#define XPAR_XEMACPS_0_BASEADDR       PS_IO_BASE + 0xb000
-
-//?????????????????
-#define XPAR_XEMACPS_0_IS_CACHE_COHERENT 1
-#define XPAR_XEMACPS_0_ENET_SLCR_1000Mbps_DIV0 8
-#define XPAR_XEMACPS_0_ENET_SLCR_1000Mbps_DIV1 1
-#define XPAR_XEMACPS_0_ENET_SLCR_100Mbps_DIV0 8
-#define XPAR_XEMACPS_0_ENET_SLCR_100Mbps_DIV1 5
-#define XPAR_XEMACPS_0_ENET_SLCR_10Mbps_DIV0 8
-#define XPAR_XEMACPS_0_ENET_SLCR_10Mbps_DIV1 50
-
 #endif
 ''')
             write_to_file(os.path.join(self.builder.include_dir, 'xpseudo_asm.h'), '''
